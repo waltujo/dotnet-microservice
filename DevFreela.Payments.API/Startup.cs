@@ -30,6 +30,7 @@ namespace DevFreela.Payments.API
         {
 
             services.AddScoped<IPaymentService, PaymentService>();
+
             services.AddHostedService<ProcessPaymentConsumer>();
 
             services.AddControllers();

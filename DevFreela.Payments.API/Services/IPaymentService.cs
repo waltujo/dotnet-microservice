@@ -6,5 +6,6 @@ namespace DevFreela.Payments.API.Services
     public interface IPaymentService
     {
         Task<bool> Process(PaymentInfoInputModel paymentInfoInputModel);
+        void ProcessMessageBus(PaymentInfoInputModel paymentInfoInputModel);
     }
 }

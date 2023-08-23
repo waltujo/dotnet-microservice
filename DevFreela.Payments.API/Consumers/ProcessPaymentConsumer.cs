@@ -1,5 +1,6 @@
 ﻿using DevFreela.Payments.API.Models;
 using DevFreela.Payments.API.Services;
+using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using RabbitMQ.Client;
@@ -14,48 +15,60 @@ namespace DevFreela.Payments.API.Consumers
 {
     public class ProcessPaymentConsumer : BackgroundService
     {
-        private const string QUEUE = "Payments";
-        private const string PAYMENT_APPROVED_QUEUE = "PaymentsApproved";
         private readonly IConnection _connection;
         private readonly IModel _channel;
         private readonly IServiceProvider _serviceProvider;
+        private readonly string _userRabbitMQ;
+        private readonly string _passwordRabbitMQ;
+        private readonly string _hostName;
+        private const string QUEUE = "Payments";
+        private const string PAYMENT_APROVED_QUEUE = "PaymentsApproved";
 
-        public ProcessPaymentConsumer(IServiceProvider serviceProvider)
+        public ProcessPaymentConsumer(IServiceProvider serviceProvider, IConfiguration configuration)
         {
             _serviceProvider = serviceProvider;
 
-            var factory = new ConnectionFactory
+            _userRabbitMQ = configuration.GetSection("RabbitMQ:User").Value;
+            _passwordRabbitMQ = configuration.GetSection("RabbitMQ:Password").Value;
+            _hostName = configuration.GetSection("RabbitMQ:HostName").Value;
+
+            var connectionFactory = new ConnectionFactory()
             {
-                HostName = "localhost"
+                Uri = new Uri($"amqp://{_userRabbitMQ}:{_passwordRabbitMQ}@{_hostName}/"),
+                ConsumerDispatchConcurrency = 1,
             };
 
-            _connection = factory.CreateConnection();
+            _connection = connectionFactory.CreateConnection();
             _channel = _connection.CreateModel();
 
+            // Garantir que a fila esteja sendo consumida
             _channel.QueueDeclare(
                 queue: QUEUE,
                 durable: false,
                 exclusive: false,
                 autoDelete: false,
-                arguments: null);
+                arguments: null
+                );
 
+            // Garantir que a fila esteja sendo consumida
             _channel.QueueDeclare(
-                queue: PAYMENT_APPROVED_QUEUE,
+                queue: PAYMENT_APROVED_QUEUE,
                 durable: false,
                 exclusive: false,
                 autoDelete: false,
-                arguments: null);
+                arguments: null
+                );
+
         }
 
         protected override Task ExecuteAsync(CancellationToken stoppingToken)
         {
             var consumer = new EventingBasicConsumer(_channel);
 
-            consumer.Received += (sender, EventArgs) =>
+            consumer.Received += (sender, eventArgs) =>
             {
-                var byteArray = EventArgs.Body.ToArray();
-                var paymentInfoJson = Encoding.UTF8.GetString(byteArray);
-
+                var paymentInfoBytes = eventArgs.Body.ToArray();
+                var paymentInfoJson = Encoding.UTF8.GetString(paymentInfoBytes);
                 var paymentInfo = JsonSerializer.Deserialize<PaymentInfoInputModel>(paymentInfoJson);
 
                 ProcessPayment(paymentInfo);
@@ -66,12 +79,12 @@ namespace DevFreela.Payments.API.Consumers
 
                 _channel.BasicPublish(
                     exchange: "",
-                    routingKey: PAYMENT_APPROVED_QUEUE,
-                basicProperties: null,
+                    routingKey: PAYMENT_APROVED_QUEUE,
+                    basicProperties: null,
                     body: paymentApprovedBytes
                     );
 
-                _channel.BasicAck(EventArgs.DeliveryTag, false);
+                _channel.BasicAck(eventArgs.DeliveryTag, false);
             };
 
             _channel.BasicConsume(QUEUE, false, consumer);
